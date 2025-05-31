@@ -22,7 +22,7 @@ class Station:
         self.x = x
         self.y = y
         self.shape = shape
-        self.passengers = 0
+        self.passengers = []  
         self.overload_timer = 0.0
         self.is_overloaded = False
 
@@ -65,6 +65,23 @@ class Train:
         self.position = 0.0
         self.direction = 1
         self.current_speed = self.calculate_speed()
+        self.passengers = []  # lista pasażerów na pokładzie
+        self.capacity = 6
+    
+    def arrive_at_station(self, station):
+        # wysadzanie pasażerów
+        before = len(self.passengers)
+        self.passengers = [p for p in self.passengers if p.destination_shape != station.shape]
+        dropped_off = before - len(self.passengers)
+
+        # zabieranie nowych pasażerów
+        needed = self.capacity - len(self.passengers)
+        if needed > 0:
+            candidates = [p for p in station.passengers if p.destination_shape != station.shape]
+            to_board = candidates[:needed]
+            self.passengers.extend(to_board)
+            for p in to_board:
+                station.passengers.remove(p)
 
     def calculate_speed(self):
         segment = self.get_current_segment()
@@ -94,11 +111,18 @@ class Train:
                 self.position = max(0.0, min(1.0, self.position))
 
             self.current_speed = self.calculate_speed()
+        segment = self.get_current_segment()
+        if segment:
+            next_station = segment[0] if self.direction == -1 else segment[1]
+            self.arrive_at_station(next_station)
 
     def get_current_segment(self):
         if not self.line.segments:
             return None
         return self.line.segments[self.current_segment_index]
+class Passenger:
+    def __init__(self, destination_shape):
+        self.destination_shape = destination_shape
 
 class GameState:
     INGAME_DAY_MS = 60 * 1000  
@@ -118,7 +142,7 @@ class GameState:
             self.elapsed_time = 0
             self.total_days_passed = 0  # ile dni minęło od startu
             self.station_spawn_timer = 0
-            self.base_spawn_interval = 8000  # w ms
+            self.base_spawn_interval = 30000  # w ms
             self.passenger_count = 0
 
     def is_valid_station_position(self, x, y):
@@ -270,10 +294,15 @@ class GameState:
 
         
         for station in self.stations:
-            if random.random() < 0.01:  # ~1% szansy na tick
-                station.passengers += 1
+            if random.random() < 0.001:
+                shapes = ['C', 'T', 'Q']
+                if station.shape in shapes:
+                    possible_destinations = [s for s in shapes if s != station.shape]
+                    destination = random.choice(possible_destinations)
+                    station.passengers.append(Passenger(destination))
 
-            if station.passengers > 8:
+
+            if len(station.passengers) > 8:
                 station.overload_timer += dt / 1000.0  # dt jest w ms -> konwertujemy na sekundy
                 if station.overload_timer >= 5.0:
                     station.is_overloaded = True
