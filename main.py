@@ -31,6 +31,10 @@ while running:
                 game.handle_train_panel_click(event.pos, SCREEN_HEIGHT)
                 game.handle_mouse_down(event.button, event.pos, camera)
 
+        if event.type == pygame.MOUSEBUTTONUP:
+            game.handle_mouse_up(event.pos, camera)
+
+
     game.update(dt)
 
     

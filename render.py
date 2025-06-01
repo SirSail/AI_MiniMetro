@@ -70,11 +70,11 @@ def draw_game(screen, game_state, camera):
 
     # Rysuj wszystkie linie:
     for line in game_state.lines:
-        color = line.color
+        color = line.default_color
         # Jeśli linia jest wybrana - podkreślamy ją grubszą, jaśniejszą linią
-        highlight = (255, 255, 0) if game_state.selected_line_color == line.color else None
+        highlight = (255, 255, 0) if game_state.selected_line_color == line.default_color else None
 
-        for (station_a, station_b) in line.segments:
+        for (station_a, station_b, _) in line.segments:
             if highlight:
                 # najpierw rysujemy szerszą linię w kolorze highlight (żółtym)
                 draw_line_between_stations(screen, station_a, station_b, camera, color=highlight)
@@ -110,13 +110,24 @@ def draw_line_between_stations(screen, station_a, station_b, camera, color=(100,
 
 def draw_train(screen, train, camera):
     segment = train.line.segments[train.current_segment_index]
-    station_a, station_b = segment
+    station_a, station_b, _ = segment
+
 
     x = station_a.x + (station_b.x - station_a.x) * train.position
     y = station_a.y + (station_b.y - station_a.y) * train.position
     screen_pos = camera.apply((x, y))
 
-    pygame.draw.circle(screen, (200, 0, 0), screen_pos, 10)  # lokomotywa
+        # Obrót prostokąta zgodnie z kątem kierunku pociągu
+    angle = math.atan2(station_b.y - station_a.y, station_b.x - station_a.x)
+    length = 30
+    width = 12
+    rect_surface = pygame.Surface((length, width), pygame.SRCALPHA)
+    rect_surface.fill((200, 0, 0))  # kolor lokomotywy
+
+    rotated = pygame.transform.rotate(rect_surface, -math.degrees(angle))
+    rect = rotated.get_rect(center=screen_pos)
+    screen.blit(rotated, rect)
+
 
     offset = 15
     dx = station_b.x - station_a.x
@@ -137,7 +148,7 @@ def draw_train(screen, train, camera):
     offset_y = 20
     max_icons = 8
 
-    passenger_color = train.line.color  # kolor linii jako kolor pasażera
+    passenger_color = train.line.default_color # kolor linii jako kolor pasażera
 
     for i, p in enumerate(train.passengers[:max_icons]):
         px = screen_pos[0] + (i % 4 - 1.5) * spacing

@@ -28,17 +28,21 @@ class Station:
 
 class Line:
     def __init__(self, color):
-        self.color = color
-        self.segments = []
+        self.default_color = color
+        self.segments = []  # list of tuples: (station_a, station_b, color)
         self.is_loop = False
         self.is_bidirectional = False
 
     def add_segment(self, station_a, station_b):
-        if (station_a, station_b) in self.segments or (station_b, station_a) in self.segments:
+        if any((a == station_a and b == station_b) or (a == station_b and b == station_a) for a, b, _ in self.segments):
             return False
-        self.segments.append((station_a, station_b))
+        self.segments.append((station_a, station_b, self.default_color))
         self.update_line_type()
         return True
+
+    def get_segments(self):
+        return self.segments
+
 
     def update_line_type(self):
         if len(self.segments) < 2:
@@ -67,7 +71,9 @@ class Train:
         self.current_speed = self.calculate_speed()
         self.passengers = []  # lista pasażerów na pokładzie
         self.capacity = 6
-    
+        self.current_segment = line.segments[0] if line.segments else None
+
+
     def arrive_at_station(self, station):
         # wysadzanie pasażerów
         before = len(self.passengers)
@@ -87,39 +93,63 @@ class Train:
         segment = self.get_current_segment()
         if not segment:
             return 0
-        a, b = segment
+        a, b, _ = segment
+
         dist = math.hypot(b.x - a.x, b.y - a.y)
         return BASE_TRAIN_SPEED / (dist + 1)
-
-    def update(self):
-        if not self.line.segments:
-            return
-        self.position += self.current_speed * self.direction
-
-        if self.position >= 1.0 or self.position <= 0.0:
-            if self.line.is_loop:
-                self.current_segment_index = (self.current_segment_index + self.direction) % len(self.line.segments)
-                self.position = 0.0 if self.direction == 1 else 1.0
-            elif self.line.is_bidirectional:
-                if self.position >= 1.0 and self.current_segment_index == len(self.line.segments) - 1:
-                    self.direction = -1
-                elif self.position <= 0.0 and self.current_segment_index == 0:
-                    self.direction = 1
-                self.current_segment_index += self.direction
-                self.position = 0.0 if self.direction == 1 else 1.0
-            else:
-                self.position = max(0.0, min(1.0, self.position))
-
-            self.current_speed = self.calculate_speed()
-        segment = self.get_current_segment()
-        if segment:
-            next_station = segment[0] if self.direction == -1 else segment[1]
-            self.arrive_at_station(next_station)
 
     def get_current_segment(self):
         if not self.line.segments:
             return None
-        return self.line.segments[self.current_segment_index]
+        index = self.current_segment_index
+        if 0 <= index < len(self.line.segments):
+            return self.line.segments[index]
+        return None
+
+    def update(self):
+        if not self.line.segments or self.current_segment is None:
+            return
+
+        a, b, _ = self.current_segment
+        dx = b.x - a.x
+        dy = b.y - a.y
+        speed = self.calculate_speed()
+        self.position += self.direction * speed
+
+        if self.position >= 1.0:
+            self.position = 0.0
+            self.arrive_at_station(b)
+            self.move_to_next_segment(current_station=b)
+        elif self.position < 0.0:
+            self.position = 1.0
+            self.arrive_at_station(a)
+            self.move_to_next_segment(current_station=a)
+
+
+    def move_to_next_segment(self, current_station):
+        if not self.line.segments:
+            return
+
+        self.current_segment_index += self.direction
+
+        if self.current_segment_index >= len(self.line.segments):
+            if self.line.is_loop:
+                self.current_segment_index = 0
+            else:
+                self.current_segment_index = len(self.line.segments) - 2
+                self.direction = -1
+
+        elif self.current_segment_index < 0:
+            if self.line.is_loop:
+                self.current_segment_index = len(self.line.segments) - 1
+            else:
+                self.current_segment_index = 1
+                self.direction = 1
+
+        self.current_segment = self.line.segments[self.current_segment_index]
+
+
+
 class Passenger:
     def __init__(self, destination_shape):
         self.destination_shape = destination_shape
@@ -144,7 +174,10 @@ class GameState:
             self.station_spawn_timer = 0
             self.base_spawn_interval = 30000  # w ms
             self.passenger_count = 0
+            self.dragged_segment = None  # przechowywany przeciągany segment
+            self.dragged_line = None     # linia, której segment przeciągamy
 
+        
     def is_valid_station_position(self, x, y):
         min_dist = 80
         max_dist = 300
@@ -187,6 +220,11 @@ class GameState:
             self.unlocked_colors.append(LINE_COLORS[len(self.unlocked_colors)])
 
     def select_line_color(self, color):
+        if self.selected_line_color == color:
+            # Jeśli kliknięto ponownie ten sam kolor, odznacz
+            print(f"Odznaczono kolor linii: {color}")
+            self.selected_line_color = None
+            return False
         if color not in self.get_available_colors():
             print("Kolor zajęty lub zablokowany")
             return False
@@ -194,17 +232,37 @@ class GameState:
         print(f"Wybrano kolor linii: {color}")
         return True
 
+
     def add_train_to_line(self, color):
         line = self.color_to_line.get(color)
         if line and not any(t.line == line for t in self.trains):
             self.trains.append(Train(line))
             print(f"Dodano pociąg do linii {color}")
 
+    def find_clicked_segment(self, pos):
+        for line in self.lines:
+            for a, b, color in line.get_segments():
+                if self.is_near_line_segment(pos, a, b):
+                    return line, a, b
+        return None
+
+    def is_near_line_segment(self, pos, a, b, threshold=10):
+        px, py = pos
+        dx, dy = b.x - a.x, b.y - a.y
+        length_squared = dx**2 + dy**2
+        if length_squared == 0:
+            return False
+        t = max(0, min(1, ((px - a.x) * dx + (py - a.y) * dy) / length_squared))
+        proj_x = a.x + t * dx
+        proj_y = a.y + t * dy
+        return math.hypot(proj_x - px, proj_y - py) < threshold
+
     def restart_line(self, color):
         line = self.color_to_line.get(color)
         if line:
             line.clear_segments()
             print(f"Restartowano linię {color}")
+
     def handle_train_panel_click(self, pos, screen_height):
         base_x = 20
         base_y = screen_height - 100
@@ -256,7 +314,15 @@ class GameState:
             clicked_station = next((s for s in self.stations if math.hypot(s.x - world_pos[0], s.y - world_pos[1]) <= STATION_RADIUS), None)
 
             if not clicked_station:
+                # Spróbuj znaleźć kliknięty segment — logika przeciągania
+                segment_info = self.find_clicked_segment((pos[0] + camera.x, pos[1] + camera.y))
+                if segment_info:
+                    line, a, b = segment_info
+                    self.dragged_segment = (a, b)
+                    self.dragged_line = line
+                    print(f"Rozpoczęto przeciąganie segmentu między {a.shape} a {b.shape}")
                 return
+
 
             if self.selected_station is None:
                 self.selected_station = clicked_station
@@ -279,6 +345,54 @@ class GameState:
                     if added:
                         print(f"Dodano segment do linii {self.selected_line_color} między {self.selected_station.shape} a {clicked_station.shape}")
                 self.selected_station = None
+                segment_info = self.find_clicked_segment((pos[0] + camera.x, pos[1] + camera.y))
+                if segment_info:
+                    line, a, b = segment_info
+                    self.dragged_segment = (a, b)
+                    self.dragged_line = line
+    def handle_mouse_up(self, pos, camera):
+        print("🖱️ handle_mouse_up został wywołany")
+        if self.dragged_segment and self.dragged_line:
+            a, b = self.dragged_segment
+            world_pos = (pos[0] + camera.x, pos[1] + camera.y)
+
+            print(f"Mouse world pos: {world_pos}")
+            for s in self.stations:
+                dist = math.hypot(s.x - world_pos[0], s.y - world_pos[1])
+                print(f"Stacja {s.shape} ({s.x}, {s.y}) - dystans od kursora: {dist:.2f}")
+
+            dropped_station = next(
+                (s for s in self.stations if math.hypot(s.x - world_pos[0], s.y - world_pos[1]) <= STATION_RADIUS),
+                None
+            )
+
+            # Awaryjnie dodaj stację, jeśli nic nie znaleziono
+            if not dropped_station:
+                dropped_station = Station('X', world_pos[0], world_pos[1])
+                self.stations.append(dropped_station)
+                print("🔧 Dodano tymczasową stację testową na środku przeciągania")
+
+            if dropped_station not in (a, b):
+                segments = self.dragged_line.segments
+                for i, (s1, s2, _) in enumerate(segments):
+                    if (s1 == a and s2 == b) or (s1 == b and s2 == a):
+                        color = self.dragged_line.default_color
+                        new_segments = segments[:i] + [
+                            (a, dropped_station, color),
+                            (dropped_station, b, color)
+                        ] + segments[i+1:]
+                        self.dragged_line.segments = new_segments
+                        self.dragged_line.update_line_type()
+                        print(f"✅ Segment {a.shape}-{b.shape} rozdzielony przez {dropped_station.shape}")
+                        break
+            else:
+                print(f"⚠️ Nie znaleziono nowej stacji do przecięcia segmentu lub wybrano stację {a.shape}/{b.shape}")
+
+        self.dragged_segment = None
+        self.dragged_line = None
+
+
+
 
     def update(self, dt):
         self.elapsed_time += dt
