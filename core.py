@@ -34,11 +34,21 @@ class Line:
         self.is_bidirectional = False
 
     def add_segment(self, station_a, station_b):
+        if not isinstance(station_a, Station) or not isinstance(station_b, Station):
+            print(f"⚠️ Próba dodania segmentu z nie-stacjami: {station_a}, {station_b}")
+            return False
+        if station_a == station_b:
+            return False  # nie dodajemy segmentu do tej samej stacji
+
+        # Unikalność segmentu
         if any((a == station_a and b == station_b) or (a == station_b and b == station_a) for a, b, _ in self.segments):
             return False
+
         self.segments.append((station_a, station_b, self.default_color))
         self.update_line_type()
         return True
+
+
 
     def get_segments(self):
         return self.segments
@@ -66,87 +76,213 @@ class Train:
     def __init__(self, line):
         self.line = line
         self.current_segment_index = 0
-        self.position = 0.0
         self.direction = 1
-        self.current_speed = self.calculate_speed()
-        self.passengers = []  # lista pasażerów na pokładzie
+        self.passengers = []
         self.capacity = 6
+        self.on_ghost_segment = False
+
         self.current_segment = line.segments[0] if line.segments else None
+        self.position = 0.0
+        self.current_speed = self.calculate_speed()
 
+        self.state = "moving"  # "moving", "boarding"
+        self.stop_timer = 0.0
+        self.boarding_timer = 0.0
+        self.boarding_index = 0
 
-    def arrive_at_station(self, station):
-        # wysadzanie pasażerów
-        before = len(self.passengers)
-        self.passengers = [p for p in self.passengers if p.destination_shape != station.shape]
-        dropped_off = before - len(self.passengers)
-
-        # zabieranie nowych pasażerów
-        needed = self.capacity - len(self.passengers)
-        if needed > 0:
-            candidates = [p for p in station.passengers if p.destination_shape != station.shape]
-            to_board = candidates[:needed]
-            self.passengers.extend(to_board)
-            for p in to_board:
-                station.passengers.remove(p)
-
-    def calculate_speed(self):
-        segment = self.get_current_segment()
-        if not segment:
-            return 0
-        a, b, _ = segment
-
-        dist = math.hypot(b.x - a.x, b.y - a.y)
-        return BASE_TRAIN_SPEED / (dist + 1)
-
-    def get_current_segment(self):
-        if not self.line.segments:
-            return None
-        index = self.current_segment_index
-        if 0 <= index < len(self.line.segments):
-            return self.line.segments[index]
-        return None
-
+    # === GŁÓWNY UPDATE ===
     def update(self):
-        if not self.line.segments or self.current_segment is None:
+        if not self.current_segment:
+            return
+
+        if self.state == "boarding":
+            self.handle_boarding()
             return
 
         a, b, _ = self.current_segment
-        dx = b.x - a.x
-        dy = b.y - a.y
-        speed = self.calculate_speed()
+        dist = math.hypot(b.x - a.x, b.y - a.y)
+        if dist == 0:
+            return
+
+        speed = BASE_TRAIN_SPEED / (dist + 1)
+
+        if self.position > 0.8:
+            slowdown = (1.0 - self.position) / 0.2
+            speed *= max(0.1, slowdown)
+
+        if self.position < 0.3:
+            prev_seg = self.get_previous_segment()
+            if prev_seg:
+                angle = self.calculate_turn_angle(prev_seg, self.current_segment)
+                if angle < 90:
+                    speed *= 0.3 + 0.7 * ((90 - angle) / 90)
+                elif angle < 120:
+                    speed *= 0.8
+
+        if self.count_crossings_not_at_station(a, b) > 0:
+            speed *= 0.5
+
         self.position += self.direction * speed
 
         if self.position >= 1.0:
-            self.position = 0.0
-            self.arrive_at_station(b)
-            self.move_to_next_segment(current_station=b)
-        elif self.position < 0.0:
             self.position = 1.0
-            self.arrive_at_station(a)
-            self.move_to_next_segment(current_station=a)
+            self.state = "boarding"
+            self.stop_timer = 0.0
+            self.boarding_index = 0
+        elif self.position < 0.0:
+            self.position = 0.0
+            self.state = "boarding"
+            self.stop_timer = 0.0
+            self.boarding_index = 0
 
+    # === SEGMENT I RUCH PO LINII ===
+    def get_current_segment(self):
+        if 0 <= self.current_segment_index < len(self.line.segments):
+            return self.line.segments[self.current_segment_index]
+        return None
 
     def move_to_next_segment(self, current_station):
         if not self.line.segments:
+            self.current_segment = None
             return
 
         self.current_segment_index += self.direction
+        n = len(self.line.segments)
 
-        if self.current_segment_index >= len(self.line.segments):
+        if self.current_segment_index >= n:
             if self.line.is_loop:
                 self.current_segment_index = 0
             else:
-                self.current_segment_index = len(self.line.segments) - 2
+                self.current_segment_index = max(n - 2, 0)
                 self.direction = -1
-
         elif self.current_segment_index < 0:
             if self.line.is_loop:
-                self.current_segment_index = len(self.line.segments) - 1
+                self.current_segment_index = n - 1
             else:
-                self.current_segment_index = 1
+                self.current_segment_index = 1 if n > 1 else 0
                 self.direction = 1
 
-        self.current_segment = self.line.segments[self.current_segment_index]
+        if 0 <= self.current_segment_index < n:
+            self.current_segment = self.line.segments[self.current_segment_index]
+        else:
+            print(f"⚠️ Niepoprawny current_segment_index: {self.current_segment_index}")
+            self.current_segment = None
+
+    def get_previous_segment(self):
+        try:
+            return self.line.segments[self.current_segment_index - self.direction]
+        except IndexError:
+            return None
+
+    def find_segment_index_closest_to_station(self, station):
+        for i, (a, b, _) in enumerate(self.line.segments):
+            if a == station or b == station:
+                return i
+        return 0
+
+    def is_on_ghost_segment(self):
+        return self.current_segment not in self.line.segments
+
+    def get_station_at_current_position(self):
+        if not self.current_segment:
+            return None
+        a, b, _ = self.current_segment
+        return b if self.position >= 1.0 else a if self.position <= 0.0 else None
+
+    # === PASAŻEROWIE ===
+    def handle_boarding(self):
+        station = self.get_station_at_current_position()
+        if not station:
+            self.state = "moving"
+            return
+
+        self.stop_timer += 0.016
+        if self.stop_timer < 0.3:
+            return
+
+        if self.boarding_index == 0:
+            self.passengers = [p for p in self.passengers if p.destination_shape != station.shape]
+
+        candidates = [p for p in station.passengers if p.destination_shape != station.shape]
+
+        self.boarding_timer += 0.016
+        if self.boarding_timer >= 0.2:
+            self.boarding_timer = 0
+            if candidates and len(self.passengers) < self.capacity:
+                p = candidates.pop(0)
+                self.passengers.append(p)
+                station.passengers.remove(p)
+                self.boarding_index += 1
+                return
+
+        if len(self.passengers) >= self.capacity or not candidates:
+            self.state = "moving"
+            self.boarding_timer = 0.0
+            self.boarding_index = 0
+            self.move_to_next_segment(current_station=station)
+            self.position = 0.0 if self.direction > 0 else 1.0
+
+    # === OBLICZENIA I GEOMETRIA ===
+    def calculate_speed(self):
+        if not self.current_segment:
+            return 0
+        a, b, _ = self.current_segment
+        dist = math.hypot(b.x - a.x, b.y - a.y)
+        if dist == 0:
+            return 0.01
+        return BASE_TRAIN_SPEED / (dist + 1)
+
+    def count_crossings_not_at_station(self, a, b):
+        count = 0
+        for x, y, _ in self.line.segments:
+            if (x, y) == (a, b) or (y, x) == (a, b):
+                continue
+            if self.do_segments_cross(a, b, x, y):
+                if x not in [a, b] and y not in [a, b]:
+                    count += 1
+        return count
+
+    def do_segments_cross(self, a1, a2, b1, b2):
+        def ccw(p1, p2, p3):
+            return (p3.y - p1.y) * (p2.x - p1.x) > (p2.y - p1.y) * (p3.x - p1.x)
+        return (
+            ccw(a1, b1, b2) != ccw(a2, b1, b2) and
+            ccw(a1, a2, b1) != ccw(a1, a2, b2)
+        )
+
+    def calculate_turn_angle(self, seg1, seg2):
+        a1, b1, _ = seg1
+        a2, b2, _ = seg2
+
+        pivot = None
+        if b1 == a2:
+            pivot = b1
+            vec1 = (a1.x - pivot.x, a1.y - pivot.y)
+            vec2 = (b2.x - pivot.x, b2.y - pivot.y)
+        elif b1 == b2:
+            pivot = b1
+            vec1 = (a1.x - pivot.x, a1.y - pivot.y)
+            vec2 = (a2.x - pivot.x, a2.y - pivot.y)
+        elif a1 == a2:
+            pivot = a1
+            vec1 = (b1.x - pivot.x, b1.y - pivot.y)
+            vec2 = (b2.x - pivot.x, b2.y - pivot.y)
+        elif a1 == b2:
+            pivot = a1
+            vec1 = (b1.x - pivot.x, b1.y - pivot.y)
+            vec2 = (a2.x - pivot.x, a2.y - pivot.y)
+        else:
+            return 180
+
+        dot = vec1[0]*vec2[0] + vec1[1]*vec2[1]
+        mag1 = math.hypot(*vec1)
+        mag2 = math.hypot(*vec2)
+        if mag1 == 0 or mag2 == 0:
+            return 180
+
+        cos_angle = dot / (mag1 * mag2)
+        return math.degrees(math.acos(max(-1, min(1, cos_angle))))
+
 
 
 
@@ -176,6 +312,7 @@ class GameState:
             self.passenger_count = 0
             self.dragged_segment = None  # przechowywany przeciągany segment
             self.dragged_line = None     # linia, której segment przeciągamy
+            self.selected_line = None
 
         
     def is_valid_station_position(self, x, y):
@@ -320,6 +457,7 @@ class GameState:
                     line, a, b = segment_info
                     self.dragged_segment = (a, b)
                     self.dragged_line = line
+                    self.selected_line = line
                     print(f"Rozpoczęto przeciąganie segmentu między {a.shape} a {b.shape}")
                 return
 
@@ -351,7 +489,9 @@ class GameState:
                     self.dragged_segment = (a, b)
                     self.dragged_line = line
     def handle_mouse_up(self, pos, camera):
-        print("🖱️ handle_mouse_up został wywołany")
+        if self.selected_line is None:
+            return  # nie rób nic, jeśli nie wybrano linii
+
         if self.dragged_segment and self.dragged_line:
             a, b = self.dragged_segment
             world_pos = (pos[0] + camera.x, pos[1] + camera.y)
@@ -368,9 +508,9 @@ class GameState:
 
             # Awaryjnie dodaj stację, jeśli nic nie znaleziono
             if not dropped_station:
-                dropped_station = Station('X', world_pos[0], world_pos[1])
-                self.stations.append(dropped_station)
-                print("🔧 Dodano tymczasową stację testową na środku przeciągania")
+                self.dragged_segment = None
+                self.dragged_line = None
+                return
 
             if dropped_station not in (a, b):
                 segments = self.dragged_line.segments
@@ -383,7 +523,35 @@ class GameState:
                         ] + segments[i+1:]
                         self.dragged_line.segments = new_segments
                         self.dragged_line.update_line_type()
+                        # Zaktualizuj indeksy pociągów, jeśli zmiana dotyczyła wcześniejszego segmentu
+                        for train in self.trains:
+                            if train.line == self.dragged_line:
+                                # znajdź oryginalny indeks zmodyfikowanego segmentu
+                                try:
+                                    original_index = segments.index((a, b, color))
+                                except ValueError:
+                                    original_index = segments.index((b, a, color))
+
+                                if train.current_segment_index > original_index:
+                                    train.current_segment_index += 1  # bo jeden segment zastąpiły dwa
+                                    print(f"🔁 Skorygowano indeks pociągu z powodu edycji wcześniejszego segmentu")
+
+                                elif train.current_segment_index == original_index:
+                                    # Segment, po którym jedzie, został rozdzielony
+                                    train.on_ghost_segment = True
+                                    print(f"👻 Pociąg był na modyfikowanym segmencie — pozostaje na ghost segmencie {a.shape}-{b.shape}")
+
                         print(f"✅ Segment {a.shape}-{b.shape} rozdzielony przez {dropped_station.shape}")
+                        # Aktualizuj segmenty pociągów jeśli któryś jechał po modyfikowanym segmencie
+                        for train in self.trains:
+                            if train.line == self.dragged_line:
+                                # Jeśli aktualny segment to właśnie rozdzielany
+                                if train.current_segment == (a, b, color) or train.current_segment == (b, a, color):
+                                    train.on_ghost_segment = True
+                                    print(f"👻 Pociąg wchodzi na ghost segment: {a.shape}-{b.shape}")
+                                    # NIE zmieniamy current_segment ani position!
+
+
                         break
             else:
                 print(f"⚠️ Nie znaleziono nowej stacji do przecięcia segmentu lub wybrano stację {a.shape}/{b.shape}")

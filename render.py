@@ -2,7 +2,7 @@ import pygame
 from core import LINE_COLORS
 from core import STATION_RADIUS
 import math
-
+from collections import defaultdict
 TRAIN_ICON_SIZE = 30
 TRAIN_ICON_PADDING = 10
 class Camera:
@@ -64,26 +64,35 @@ class Camera:
         screen.blit(score_text, (hud_rect.x + 10, hud_rect.y + 25))
 
 
-# funkcje rysujące z użyciem kamery:
+
+
+
 def draw_game(screen, game_state, camera):
     draw_river(screen, game_state, camera)
 
-    # Rysuj wszystkie linie:
+    # Utwórz słownik: klucz to tuple (station_a, station_b) (w uporządkowanej kolejności), wartość to lista kolorów linii na tym segmencie
+    segment_map = defaultdict(list)
+
     for line in game_state.lines:
-        color = line.default_color
-        # Jeśli linia jest wybrana - podkreślamy ją grubszą, jaśniejszą linią
-        highlight = (255, 255, 0) if game_state.selected_line_color == line.default_color else None
-
         for (station_a, station_b, _) in line.segments:
-            if highlight:
-                # najpierw rysujemy szerszą linię w kolorze highlight (żółtym)
-                draw_line_between_stations(screen, station_a, station_b, camera, color=highlight)
-                # potem trochę węższą w oryginalnym kolorze
-                draw_line_between_stations(screen, station_a, station_b, camera, color=color)
-            else:
-                draw_line_between_stations(screen, station_a, station_b, camera, color=color)
+            if not (hasattr(station_a, 'x') and hasattr(station_b, 'x')):
+                print(f"❌ Błędne segmenty: {station_a} ({type(station_a)}), {station_b} ({type(station_b)})")
+                continue
+            key = tuple(sorted((station_a, station_b), key=lambda s: (s.x, s.y)))
+            segment_map[key].append(line.default_color)
 
-    # Rysuj stacje
+
+    # Teraz narysuj segmenty z offsetem
+    for (station_a, station_b), colors in segment_map.items():
+        # dla każdej linii przypisz offsety np. -1, 0, 1, 2...
+        offsets = list(range(-(len(colors)//2), len(colors)//2 + 1))
+        if len(colors) % 2 == 0:
+            # jeśli jest parzysta liczba kolorów, usuń zero z offsetów aby uniknąć podwójnego 0
+            offsets.remove(0)
+        for color, offset in zip(colors, offsets):
+            draw_offset_line_between_stations(screen, station_a, station_b, camera, color, offset)
+
+    # Rysuj stacje i resztę tak samo jak wcześniej
     for station in game_state.stations:
         draw_station(screen, station, camera)
 
@@ -91,25 +100,60 @@ def draw_game(screen, game_state, camera):
     if game_state.selected_station is not None:
         x, y = camera.apply((game_state.selected_station.x, game_state.selected_station.y))
         pygame.draw.circle(screen, (255, 255, 0), (x, y), STATION_RADIUS + 5, 3)
-
-    # Rysuj pociągi
+    
+# Rysuj pociągi + duchowe segmenty
     for train in game_state.trains:
+        if train.on_ghost_segment and train.current_segment:
+            a, b, color = train.current_segment
+            base_color = color if isinstance(color, tuple) else (200, 200, 200)
+            
+            # rozjaśnij kolor
+            brightened = tuple(min(255, c + 80) for c in base_color)
+            
+            draw_offset_line_between_stations(screen, a, b, camera, brightened, offset=0)
+
+            
+
         draw_train(screen, train, camera)
+
 
     # Rysuj pasek wyboru koloru
     draw_color_picker(screen, game_state)
 
     draw_train_panel(screen, game_state)
 
+
 def draw_line_between_stations(screen, station_a, station_b, camera, color=(100, 100, 100)):
     start_pos = camera.apply((station_a.x, station_a.y))
     end_pos = camera.apply((station_b.x, station_b.y))
     pygame.draw.line(screen, color, start_pos, end_pos, 4)
 
+def draw_offset_line_between_stations(screen, station_a, station_b, camera, color, offset=0):
+    start_pos = camera.apply((station_a.x, station_a.y))
+    end_pos = camera.apply((station_b.x, station_b.y))
+    dx = end_pos[0] - start_pos[0]
+    dy = end_pos[1] - start_pos[1]
+    length = (dx ** 2 + dy ** 2) ** 0.5
+    if length == 0:
+        offset_x = offset_y = 0
+    else:
+        dx /= length
+        dy /= length
+        offset_x = -dy * offset * 4  # 4 to szerokość przesunięcia w pikselach
+        offset_y = dx * offset * 4
+
+    start_shifted = (start_pos[0] + offset_x, start_pos[1] + offset_y)
+    end_shifted = (end_pos[0] + offset_x, end_pos[1] + offset_y)
+    pygame.draw.line(screen, pygame.Color(color), start_shifted, end_shifted, 6)
+
+
 
 
 def draw_train(screen, train, camera):
-    segment = train.line.segments[train.current_segment_index]
+    segment = train.current_segment
+    if not segment:
+        return
+
     station_a, station_b, _ = segment
 
 
