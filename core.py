@@ -129,6 +129,23 @@ class Train:
             self.state = "boarding"
             self.stop_timer = 0.0
             self.boarding_index = 0
+
+            if self.on_ghost_segment:
+                self.on_ghost_segment = False
+                # Znajdź pasujący segment po ghost
+                for i, seg in enumerate(self.line.segments):
+                    if b in seg:
+                        # 🔄 Korekta indeksu zależna od pozycji na ghost segmencie
+                        if self.direction > 0:
+                            self.current_segment_index = i if self.position >= 0.5 else i - 1
+                        else:
+                            self.current_segment_index = i if self.position <= 0.5 else i + 1
+
+                        # Zabezpieczenie granic
+                        self.current_segment_index = max(0, min(self.current_segment_index, len(self.line.segments) - 1))
+                        self.current_segment = self.line.segments[self.current_segment_index]
+                        break
+
         elif self.position < 0.0:
             self.position = 0.0
             self.state = "boarding"
