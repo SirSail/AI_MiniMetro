@@ -16,7 +16,7 @@ TRAIN_ICON_SIZE = 30
 TRAIN_ICON_PADDING = 10
 
 INITIAL_UNLOCKED_LINES = 3
-
+WEEK_DAYS = ["Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek", "Sobota", "Niedziela"]
 class Station:
     def __init__(self, x, y, shape):
         self.x = x
@@ -32,7 +32,7 @@ class Line:
         self.segments = []  # list of tuples: (station_a, station_b, color)
         self.is_loop = False
         self.is_bidirectional = False
-
+        
     def add_segment(self, station_a, station_b):
         if not isinstance(station_a, Station) or not isinstance(station_b, Station):
             print(f"⚠️ Próba dodania segmentu z nie-stacjami: {station_a}, {station_b}")
@@ -73,13 +73,14 @@ class Line:
         self.is_bidirectional = False
 
 class Train:
-    def __init__(self, line):
+    def __init__(self, line, game_state=None):
         self.line = line
         self.extra_carriages = 0  
         self.current_segment_index = 0
         self.direction = 1
         self.passengers = []
         self.on_ghost_segment = False
+        self.game_state = game_state
 
         self.current_segment = line.segments[0] if line.segments else None
         self.position = 0.0
@@ -210,8 +211,10 @@ class Train:
     # === PASAŻEROWIE ===
     def capacity(self):
         return 6 + self.extra_carriages * 6
+
     def add_carriage(self):
         self.extra_carriages += 1
+
     def handle_boarding(self):
         station = self.get_station_at_current_position()
         if not station:
@@ -223,7 +226,12 @@ class Train:
             return
 
         if self.boarding_index == 0:
+            delivered = [p for p in self.passengers if p.destination_shape == station.shape]
+            if delivered:
+                self.game_state.register_delivered_passengers(len(delivered))
+                print(f"🏆 Dostarczono {len(delivered)} pasażerów na stację {station.shape} | Łączny wynik: {self.game_state.total_score}")
             self.passengers = [p for p in self.passengers if p.destination_shape != station.shape]
+
 
         candidates = [p for p in station.passengers if p.destination_shape != station.shape]
 
@@ -313,56 +321,70 @@ class Passenger:
         self.destination_shape = destination_shape
 
 class GameState:
-    INGAME_DAY_MS = 60 * 1000  
+    INGAME_DAY_MS = 60 * 1000
     UNLOCK_CYCLE_DAYS = 7
-    def __init__(self, width, height):
-            self.width = int(width * 1.5)
-            self.height = int(height * 1.5)
-            self.river_y = self.height // 2
-            self.stations = []  # <-- najpierw inicjalizacja pustej listy
-            self.stations = self.generate_initial_stations()  # potem wygenerowanie początkowych stacji
-            self.selected_station = None
-            self.lines = []
-            self.trains = []
-            self.selected_line_color = None
-            self.color_to_line = {}
-            self.unlocked_colors = LINE_COLORS[:INITIAL_UNLOCKED_LINES]
-            self.elapsed_time = 0
-            self.total_days_passed = 0  # ile dni minęło od startu
-            self.station_spawn_timer = 0
-            self.base_spawn_interval = 30000  # w ms
-            self.passenger_count = 0
-            self.dragged_segment = None  # przechowywany przeciągany segment
-            self.dragged_line = None     # linia, której segment przeciągamy
-            self.selected_line = None
-            self.available_trains = 2
-            self.available_carriages = 0
-            self.dragging_train_icon = False
-            self.dragging_carriage_icon = False
+    
 
-        
+    def __init__(self, width, height):
+        # Rozmiar świata i mapa
+        self.width = int(width * 1.5)
+        self.height = int(height * 1.5)
+        self.river_y = self.height // 2
+
+        # Stacje
+        self.stations = []
+        self.stations = self.generate_initial_stations()
+        self.selected_station = None
+
+        # Linie i kolory
+        self.lines = []
+        self.color_to_line = {}
+        self.unlocked_colors = LINE_COLORS[:INITIAL_UNLOCKED_LINES]
+        self.selected_line_color = None
+        self.selected_line = None
+
+        # Pociągi
+        self.trains = []
+        self.available_trains = 2
+        self.available_carriages = 0
+
+        # Przeciąganie segmentów
+        self.dragged_segment = None
+        self.dragged_line = None
+
+        # Interfejs zasobów
+        self.dragging_train_icon = False
+        self.dragging_carriage_icon = False
+
+        # Czas gry i pasażerowie
+        self.elapsed_time = 0
+        self.total_days_passed = 0
+        self.passenger_count = 0
+        self.total_score = 0
+        self.week_day_index = 0  # 0 = poniedziałek, 6 = niedziela
+        self.week_number = 1
+
+        # Spawn stacji
+        self.station_spawn_timer = 0
+        self.base_spawn_interval = 30000
+
+    # === GENEROWANIE STACJI ===
+
     def is_valid_station_position(self, x, y):
         min_dist = 80
-        max_dist = 300
         for s in self.stations:
-            dist = math.hypot(x - s.x, y - s.y)
-            if dist < min_dist:
+            if math.hypot(x - s.x, y - s.y) < min_dist:
                 return False
         return True
 
     def generate_station_with_shape(self, shape, on_top):
         for _ in range(100):
-            center_x = self.width // 2
-            x_range = self.width // 3
-            x = random.randint(center_x - x_range, center_x + x_range)
+            x = random.randint(self.width // 6, self.width * 5 // 6)
             y = random.randint(50, self.river_y - 50) if on_top else random.randint(self.river_y + 50, self.height - 50)
             if self.is_valid_station_position(x, y):
-                return Station(x, y, shape)  # <- poprawione!
-        # fallback
+                return Station(x, y, shape)
         return Station(random.randint(100, self.width - 100),
-                    random.randint(100, self.height - 100),
-                    shape)  # <- poprawione!
-
+                       random.randint(100, self.height - 100), shape)
 
     def generate_initial_stations(self):
         shapes = ['C', 'T', 'Q']
@@ -370,13 +392,14 @@ class GameState:
         return [self.generate_station_with_shape(shape, True) for shape in shapes]
 
     def add_station(self, shape, on_top):
-        new_station = self.generate_station_with_shape(shape, on_top)
-        self.stations.append(new_station)
-        return new_station
+        station = self.generate_station_with_shape(shape, on_top)
+        self.stations.append(station)
+        return station
+
+    # === ZARZĄDZANIE KOLORAMI I LINIAMI ===
 
     def get_available_colors(self):
-        used = set(self.color_to_line.keys())
-        return [c for c in self.unlocked_colors if c not in used]
+        return [c for c in self.unlocked_colors if c not in self.color_to_line]
 
     def unlock_next_line(self):
         if len(self.unlocked_colors) < len(LINE_COLORS):
@@ -384,7 +407,6 @@ class GameState:
 
     def select_line_color(self, color):
         if self.selected_line_color == color:
-            # Jeśli kliknięto ponownie ten sam kolor, odznacz
             print(f"Odznaczono kolor linii: {color}")
             self.selected_line_color = None
             return False
@@ -395,22 +417,24 @@ class GameState:
         print(f"Wybrano kolor linii: {color}")
         return True
 
+    # === POCIĄGI I WAGONY ===
 
     def add_train_to_line(self, color):
         line = self.color_to_line.get(color)
         if line and self.available_trains > 0:
-            # max 4 pociągi na linię
             trains_on_line = [t for t in self.trains if t.line == line]
             if len(trains_on_line) < 4:
                 self.trains.append(Train(line))
                 self.available_trains -= 1
                 print(f"Dodano pociąg do linii {color}")
+
     def add_carriage_to_train(self, train):
         if self.available_carriages > 0:
             train.add_carriage()
             self.available_carriages -= 1
             print(f"Dodano wagon do pociągu")
 
+    # === SEGMENTY I INTERAKCJE ===
 
     def find_clicked_segment(self, pos):
         for line in self.lines:
@@ -436,44 +460,84 @@ class GameState:
             line.clear_segments()
             print(f"Restartowano linię {color}")
 
-    def handle_train_panel_click(self, pos, screen_height):
-        base_x = 20
-        base_y = screen_height - 100
-        size = TRAIN_ICON_SIZE
-        padding = TRAIN_ICON_PADDING
+    # === CZAS I PASAŻEROWIE ===
+    def get_current_day_label(self):
+        return f"{WEEK_DAYS[self.week_day_index]} | Tydzień {self.week_number}"
 
-        for i, color in enumerate(self.unlocked_colors):
-            rect = pygame.Rect(base_x + i * (size + padding), base_y, size, size)
-            if rect.collidepoint(pos):
-                self.add_train_to_line(color)
-                break
     def get_dynamic_spawn_interval(self):
-        # Bazowe opóźnienie skraca się wraz z postępem
-        time_factor = max(0.3, 1.0 - (self.elapsed_time / (5 * 60 * 1000)))  # do 5 minut
-        passenger_factor = max(0.3, 1.0 - (self.passenger_count / 200))  # do 200 pasażerów
+        time_factor = max(0.3, 1.0 - (self.elapsed_time / (5 * 60 * 1000)))
+        passenger_factor = max(0.3, 1.0 - (self.passenger_count / 200))
         interval = self.base_spawn_interval * time_factor * passenger_factor
-        return max(1500, interval)  # nigdy mniej niż 1.5 sekundy
+        return max(1500, interval)
+
+    def register_delivered_passengers(self, count):
+        self.total_score += count
+        print(f"🏆 Dostarczono {count} pasażerów | Łączny wynik: {self.total_score}")
+        
     def spawn_random_station(self):
         shapes = ['C', 'T', 'Q']
-        if random.random() < 0.05:  # 5% szans na specjalną mutację
-            shapes.append('D')  # D = diament (rzadka stacja)
+        if random.random() < 0.05:
+            shapes.append('D')
         shape = random.choice(shapes)
-
         on_top = random.choice([True, False])
-
-        if random.random() < 0.2 and self.stations:  # 20% szans na mutację istniejącej
+        if random.random() < 0.2 and self.stations:
             s = random.choice(self.stations)
-            original_shape = s.shape
+            original = s.shape
             s.shape = shape
-            print(f"Stacja {original_shape} zmutowała w {shape}")
+            print(f"Stacja {original} zmutowała w {shape}")
         else:
-            new_station = self.add_station(shape, on_top)
-            print(f"Wygenerowano nową stację: {shape} ({'góra' if on_top else 'dół'})")
+            self.add_station(shape, on_top)
+            print(f"Wygenerowano nową stację: {shape}")
 
+    # === AKTUALIZACJA ===
+
+    def update(self, dt):
+        self.elapsed_time += dt
+        # Zmiana dnia
+        if self.elapsed_time // self.INGAME_DAY_MS > self.total_days_passed:
+            self.total_days_passed += 1
+            self.week_day_index = (self.week_day_index + 1) % 7
+
+            if self.week_day_index == 0:
+                self.week_number += 1
+                print(f"📅 Nowy tydzień: #{self.week_number}")
+                self.handle_weekly_rewards()
+
+            if self.total_days_passed % self.UNLOCK_CYCLE_DAYS == 0:
+                self.unlock_next_line()
+                self.available_trains += 1
+                self.available_carriages += 1
+
+
+        for train in self.trains:
+            train.update()
+            self.passenger_count += 1  # uproszczone
+
+        for station in self.stations:
+            if random.random() < 0.001:
+                shapes = ['C', 'T', 'Q']
+                if station.shape in shapes:
+                    dest = random.choice([s for s in shapes if s != station.shape])
+                    station.passengers.append(Passenger(dest))
+
+            if len(station.passengers) > 8:
+                station.overload_timer += dt / 1000.0
+                if station.overload_timer >= 5.0:
+                    station.is_overloaded = True
+            else:
+                station.overload_timer = 0.0
+                station.is_overloaded = False
+
+        self.station_spawn_timer += dt
+        if self.station_spawn_timer >= self.get_dynamic_spawn_interval():
+            self.spawn_random_station()
+            self.station_spawn_timer = 0
+
+        # ===  Interakcja myszy (przeciąganie zasobów i segmentów) === 
     def handle_mouse_down(self, button, pos, camera):
-        # Spójne z draw_resource_info
+        # Recty spójne z UI zasobów
         train_rect = pygame.Rect(30, 30, 60, 30)
-        carriage_rect = pygame.Rect(102, 48, 40, 30)
+        carriage_rect = pygame.Rect(110, 30, 60, 30)
 
         if train_rect.collidepoint(pos) and self.available_trains > 0:
             self.dragging_train_icon = True
@@ -486,10 +550,9 @@ class GameState:
             return
 
         if button == 1:
-            base_x = 20
-            base_y = camera.screen_height - 50
-            size = 30
-            padding = 10
+            # Panel wyboru koloru linii (u dołu ekranu)
+            base_x, base_y = 20, camera.screen_height - 50
+            size, padding = 30, 10
             for i, color in enumerate(LINE_COLORS):
                 rect = pygame.Rect(base_x + i * (size + padding), base_y, size, size)
                 if rect.collidepoint(pos):
@@ -497,64 +560,60 @@ class GameState:
                     self.selected_station = None
                     return
 
+            # Wybór stacji lub segmentu na mapie
             world_pos = (pos[0] + camera.x, pos[1] + camera.y)
-            clicked_station = next((s for s in self.stations if math.hypot(s.x - world_pos[0], s.y - world_pos[1]) <= STATION_RADIUS), None)
+            clicked_station = next(
+                (s for s in self.stations if math.hypot(s.x - world_pos[0], s.y - world_pos[1]) <= STATION_RADIUS), None
+            )
 
-            if not clicked_station:
-                segment_info = self.find_clicked_segment((pos[0] + camera.x, pos[1] + camera.y))
+            if clicked_station:
+                if self.selected_station is None:
+                    self.selected_station = clicked_station
+                    print(f"Wybrano pierwszą stację: {clicked_station.shape}")
+                else:
+                    if self.selected_line_color:
+                        line = self.color_to_line.get(self.selected_line_color)
+                        if line is None:
+                            line = Line(self.selected_line_color)
+                            self.lines.append(line)
+                            self.color_to_line[self.selected_line_color] = line
+                            print(f"Utworzono nową linię koloru {self.selected_line_color}")
+
+                        if clicked_station != self.selected_station:
+                            added = line.add_segment(self.selected_station, clicked_station)
+                            if added:
+                                print(f"Dodano segment do linii {self.selected_line_color} między {self.selected_station.shape} a {clicked_station.shape}")
+
+                    self.selected_station = None
+            else:
+                segment_info = self.find_clicked_segment(world_pos)
                 if segment_info:
                     line, a, b = segment_info
                     self.dragged_segment = (a, b)
                     self.dragged_line = line
                     self.selected_line = line
                     print(f"Rozpoczęto przeciąganie segmentu między {a.shape} a {b.shape}")
-                return
 
-            if self.selected_station is None:
-                self.selected_station = clicked_station
-                print(f"Wybrano pierwszą stację: {clicked_station.shape}")
-            else:
-                if self.selected_line_color is None:
-                    print("Najpierw wybierz kolor linii do tworzenia")
-                    self.selected_station = None
-                    return
-
-                line = self.color_to_line.get(self.selected_line_color)
-                if line is None:
-                    line = Line(self.selected_line_color)
-                    self.lines.append(line)
-                    self.color_to_line[self.selected_line_color] = line
-                    print(f"Utworzono nową linię koloru {self.selected_line_color}")
-
-                if clicked_station != self.selected_station:
-                    added = line.add_segment(self.selected_station, clicked_station)
-                    if added:
-                        print(f"Dodano segment do linii {self.selected_line_color} między {self.selected_station.shape} a {clicked_station.shape}")
-                self.selected_station = None
-                segment_info = self.find_clicked_segment((pos[0] + camera.x, pos[1] + camera.y))
-                if segment_info:
-                    line, a, b = segment_info
-                    self.dragged_segment = (a, b)
-                    self.dragged_line = line
     def handle_mouse_up(self, pos, camera):
+        world_pos = (pos[0] + camera.x, pos[1] + camera.y)
+
         if self.dragging_train_icon:
             self.dragging_train_icon = False
-            segment_info = self.find_clicked_segment((pos[0] + camera.x, pos[1] + camera.y))
+            segment_info = self.find_clicked_segment(world_pos)
             if segment_info:
                 line, a, b = segment_info
                 trains_on_line = [t for t in self.trains if t.line == line]
                 if len(trains_on_line) < 4:
-                    self.trains.append(Train(line))
+                    self.trains.append(Train(line, game_state=self))  
                     self.available_trains -= 1
                     print(f"➕ Przeciągnięto pociąg na linię {line.default_color}")
             return
 
         if self.dragging_carriage_icon:
             self.dragging_carriage_icon = False
-            segment_info = self.find_clicked_segment((pos[0] + camera.x, pos[1] + camera.y))
+            segment_info = self.find_clicked_segment(world_pos)
             if segment_info:
                 line, a, b = segment_info
-                # Znajdź najbliższy pociąg na tej linii
                 for train in self.trains:
                     if train.line == line:
                         train.add_carriage()
@@ -563,29 +622,14 @@ class GameState:
                         break
             return
 
-        if self.selected_line is None:
-            return
-
         if self.dragged_segment and self.dragged_line:
             a, b = self.dragged_segment
-            world_pos = (pos[0] + camera.x, pos[1] + camera.y)
-
-            print(f"Mouse world pos: {world_pos}")
-            for s in self.stations:
-                dist = math.hypot(s.x - world_pos[0], s.y - world_pos[1])
-                print(f"Stacja {s.shape} ({s.x}, {s.y}) - dystans od kursora: {dist:.2f}")
 
             dropped_station = next(
-                (s for s in self.stations if math.hypot(s.x - world_pos[0], s.y - world_pos[1]) <= STATION_RADIUS),
-                None
+                (s for s in self.stations if math.hypot(s.x - world_pos[0], s.y - world_pos[1]) <= STATION_RADIUS), None
             )
 
-            if not dropped_station:
-                self.dragged_segment = None
-                self.dragged_line = None
-                return
-
-            if dropped_station not in (a, b):
+            if dropped_station and dropped_station not in (a, b):
                 segments = self.dragged_line.segments
                 for i, (s1, s2, _) in enumerate(segments):
                     if (s1 == a and s2 == b) or (s1 == b and s2 == a):
@@ -596,6 +640,7 @@ class GameState:
                         ] + segments[i+1:]
                         self.dragged_line.segments = new_segments
                         self.dragged_line.update_line_type()
+
                         for train in self.trains:
                             if train.line == self.dragged_line:
                                 try:
@@ -605,21 +650,18 @@ class GameState:
 
                                 if train.current_segment_index > original_index:
                                     train.current_segment_index += 1
-                                    print(f"🔁 Skorygowano indeks pociągu z powodu edycji wcześniejszego segmentu")
+                                    print(f"🔁 Skorygowano indeks pociągu przez edycję segmentu")
 
                                 elif train.current_segment_index == original_index:
                                     train.on_ghost_segment = True
-                                    print(f"👻 Pociąg był na modyfikowanym segmencie — pozostaje na ghost segmencie {a.shape}-{b.shape}")
+                                    print(f"👻 Pociąg został na segmencie widmo ({a.shape}-{b.shape})")
 
                         print(f"✅ Segment {a.shape}-{b.shape} rozdzielony przez {dropped_station.shape}")
-                        for train in self.trains:
-                            if train.line == self.dragged_line:
-                                if train.current_segment == (a, b, color) or train.current_segment == (b, a, color):
-                                    train.on_ghost_segment = True
-                                    print(f"👻 Pociąg wchodzi na ghost segment: {a.shape}-{b.shape}")
                         break
+                else:
+                    print(f"⚠️ Wybrano niewłaściwą stację lub segment nie znaleziony.")
             else:
-                print(f"⚠️ Nie znaleziono nowej stacji do przecięcia segmentu lub wybrano stację {a.shape}/{b.shape}")
+                print(f"⚠️ Nie znaleziono nowej stacji lub wybrano stację końcową.")
 
         self.dragged_segment = None
         self.dragged_line = None
@@ -628,41 +670,5 @@ class GameState:
 
 
 
-    def update(self, dt):
-        self.elapsed_time += dt
-        days_passed_now = self.elapsed_time // self.INGAME_DAY_MS
-        if days_passed_now > self.total_days_passed:
-            self.total_days_passed = days_passed_now
-            if self.total_days_passed % self.UNLOCK_CYCLE_DAYS == 0:
-                self.unlock_next_line()
-                self.available_trains += 1
-                self.available_carriages += 1
 
-        for train in self.trains:
-            train.update()
-            self.passenger_count += 1  # uproszczone, docelowo licz po wysadzeniu pasażerów
-
-        
-        for station in self.stations:
-            if random.random() < 0.001:
-                shapes = ['C', 'T', 'Q']
-                if station.shape in shapes:
-                    possible_destinations = [s for s in shapes if s != station.shape]
-                    destination = random.choice(possible_destinations)
-                    station.passengers.append(Passenger(destination))
-
-
-            if len(station.passengers) > 8:
-                station.overload_timer += dt / 1000.0  # dt jest w ms -> konwertujemy na sekundy
-                if station.overload_timer >= 5.0:
-                    station.is_overloaded = True
-            else:
-                station.overload_timer = 0.0
-                station.is_overloaded = False
-
-
-        self.station_spawn_timer += dt
-        dynamic_interval = self.get_dynamic_spawn_interval()
-        if self.station_spawn_timer >= dynamic_interval:
-            self.spawn_random_station()
-            self.station_spawn_timer = 0
+    

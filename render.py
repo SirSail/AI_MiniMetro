@@ -52,22 +52,28 @@ class Camera:
     def apply(self, pos):
         return pos[0] - self.x, pos[1] - self.y
 
-    def draw_hud(self, screen, seconds, score):
-        hud_rect = pygame.Rect(screen.get_width() - 180, 10, 170, 50)
-        pygame.draw.rect(screen, (30, 30, 30), hud_rect, border_radius=8)
-        pygame.draw.rect(screen, (200, 200, 200), hud_rect, 2, border_radius=8)
-
-        time_text = self.font.render(f"Czas: {seconds}s", True, (255, 255, 255))
-        score_text = self.font.render(f"Punkty: {score}", True, (255, 255, 255))
-
-        screen.blit(time_text, (hud_rect.x + 10, hud_rect.y + 5))
-        screen.blit(score_text, (hud_rect.x + 10, hud_rect.y + 25))
 
 
 
+
+def draw_hud(screen, game_state):
+    hud_rect = pygame.Rect(screen.get_width() - 220, 10, 200, 60)
+    pygame.draw.rect(screen, (30, 30, 30), hud_rect, border_radius=8)
+    pygame.draw.rect(screen, (200, 200, 200), hud_rect, 2, border_radius=8)
+
+    # Tekst dnia i wyniku
+    day_label = game_state.get_current_day_label()
+    font = pygame.font.SysFont("Arial", 24)
+    time_text = font.render(day_label, True, (255, 255, 255))
+    score_text = font.render(f"Pasażerowie: {game_state.total_score}", True, (255, 255, 255))
+
+
+    screen.blit(time_text, (hud_rect.x + 10, hud_rect.y + 5))
+    screen.blit(score_text, (hud_rect.x + 10, hud_rect.y + 30))
 
 
 def draw_game(screen, game_state, camera):
+
     draw_river(screen, game_state, camera)
 
     # Utwórz słownik: klucz to tuple (station_a, station_b) (w uporządkowanej kolejności), wartość to lista kolorów linii na tym segmencie
@@ -132,6 +138,9 @@ def draw_game(screen, game_state, camera):
         pygame.draw.rect(screen, (255, 255, 255), (mouse_x - 15, mouse_y - 15, 30, 30))  # cień przeciąganej ikony
         pygame.draw.rect(screen, (200, 0, 0), (mouse_x - 15, mouse_y - 15, 30, 30))
         pygame.draw.rect(screen, (255, 255, 255), (mouse_x - 7, mouse_y - 9, 14, 18))    # symbol lokomotywy
+    
+    draw_hud(screen, game_state)
+
 
 
 

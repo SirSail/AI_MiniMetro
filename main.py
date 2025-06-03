@@ -1,6 +1,7 @@
 import pygame
 from core import GameState
-from render import draw_game, Camera
+from render import draw_game, draw_hud, Camera
+
 
 pygame.init()
 SCREEN_WIDTH, SCREEN_HEIGHT = 800, 600
@@ -28,7 +29,6 @@ while running:
 
         if event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:  # lewy przycisk myszy
-                game.handle_train_panel_click(event.pos, SCREEN_HEIGHT)
                 game.handle_mouse_down(event.button, event.pos, camera)
 
         if event.type == pygame.MOUSEBUTTONUP:
@@ -47,7 +47,7 @@ while running:
 
     seconds = (pygame.time.get_ticks() - start_ticks) // 1000
     score = seconds * 10
-    camera.draw_hud(screen, seconds, score)
+    draw_hud(screen, game)
 
     pygame.display.flip()
 
