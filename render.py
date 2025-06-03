@@ -100,7 +100,13 @@ def draw_game(screen, game_state, camera):
     if game_state.selected_station is not None:
         x, y = camera.apply((game_state.selected_station.x, game_state.selected_station.y))
         pygame.draw.circle(screen, (255, 255, 0), (x, y), STATION_RADIUS + 5, 3)
-    
+   
+    if game_state.dragging_train_icon:
+        segment_info = game_state.find_clicked_segment(pygame.mouse.get_pos())
+        if segment_info:
+            line, a, b = segment_info
+            pygame.draw.line(screen, (255, 255, 255), camera.apply((a.x, a.y)), camera.apply((b.x, b.y)), 4)
+
 # Rysuj pociągi + duchowe segmenty
     for train in game_state.trains:
         if train.on_ghost_segment and train.current_segment:
@@ -120,7 +126,13 @@ def draw_game(screen, game_state, camera):
     # Rysuj pasek wyboru koloru
     draw_color_picker(screen, game_state)
 
-    draw_train_panel(screen, game_state)
+    draw_resource_info(screen, game_state)
+    if game_state.dragging_train_icon:
+        mouse_x, mouse_y = pygame.mouse.get_pos()
+        pygame.draw.rect(screen, (255, 255, 255), (mouse_x - 15, mouse_y - 15, 30, 30))  # cień przeciąganej ikony
+        pygame.draw.rect(screen, (200, 0, 0), (mouse_x - 15, mouse_y - 15, 30, 30))
+        pygame.draw.rect(screen, (255, 255, 255), (mouse_x - 7, mouse_y - 9, 14, 18))    # symbol lokomotywy
+
 
 
 def draw_line_between_stations(screen, station_a, station_b, camera, color=(100, 100, 100)):
@@ -238,6 +250,59 @@ def draw_train_panel(screen, game_state):
         text = font.render("Add", True, (255,255,255))
         text_rect = text.get_rect(center=rect.center)
         screen.blit(text, text_rect)
+def draw_resource_info(screen, game_state):
+    font = pygame.font.SysFont("Arial", 18)
+    panel_rect = pygame.Rect(20, 20, 200, 90)
+
+    # Background panel
+    pygame.draw.rect(screen, (0, 0, 0), panel_rect, border_radius=12)
+    pygame.draw.rect(screen, (255, 255, 255), panel_rect, 2, border_radius=12)
+
+    # Load icons (you must preload or handle outside for performance)
+    train_icon = pygame.image.load("assets/icon_train.png").convert_alpha()
+    carriage_icon = pygame.image.load("assets/icon_carriage.png").convert_alpha()
+    train_icon = pygame.transform.smoothscale(train_icon, (28, 28))
+    carriage_icon = pygame.transform.smoothscale(carriage_icon, (28, 28))
+
+    # Train card
+    train_card = pygame.Rect(30, 30, 60, 30)
+    pygame.draw.rect(screen, (30, 30, 30), train_card, border_radius=8)
+    pygame.draw.rect(screen, (255, 255, 255), train_card, 1, border_radius=8)
+    screen.blit(train_icon, (train_card.x + 2, train_card.y + 1))
+    train_text = font.render(f"x{game_state.available_trains}", True, (255, 255, 255))
+    screen.blit(train_text, (train_card.x + 32, train_card.y + 5))
+    game_state.train_card_rect = train_card
+
+    # Carriage card
+    carriage_card = pygame.Rect(110, 30, 60, 30)
+    pygame.draw.rect(screen, (30, 30, 30), carriage_card, border_radius=8)
+    pygame.draw.rect(screen, (255, 255, 255), carriage_card, 1, border_radius=8)
+    screen.blit(carriage_icon, (carriage_card.x + 2, carriage_card.y + 1))
+    carriage_text = font.render(f"x{game_state.available_carriages}", True, (255, 255, 0))
+    screen.blit(carriage_text, (carriage_card.x + 32, carriage_card.y + 5))
+    game_state.carriage_card_rect = carriage_card
+
+    mouse_pos = pygame.mouse.get_pos()
+    if train_card.collidepoint(mouse_pos):
+        tooltip = font.render("Drag to assign train", True, (255, 255, 255))
+        screen.blit(tooltip, (panel_rect.right + 10, panel_rect.top))
+    elif carriage_card.collidepoint(mouse_pos):
+        tooltip = font.render("Drag to assign carriage", True, (255, 255, 255))
+        screen.blit(tooltip, (panel_rect.right + 10, panel_rect.top))
+
+    if game_state.dragging_train_icon:
+        mx, my = pygame.mouse.get_pos()
+        screen.blit(train_icon, (mx - 14, my - 14))
+
+    if game_state.dragging_carriage_icon:
+        mx, my = pygame.mouse.get_pos()
+        screen.blit(carriage_icon, (mx - 14, my - 14))
+
+
+
+
+
+
 def draw_color_picker(screen, game_state):
     # Pasek kolorów w dolnym pasku ekranu
     base_x = 20

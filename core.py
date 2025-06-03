@@ -75,10 +75,10 @@ class Line:
 class Train:
     def __init__(self, line):
         self.line = line
+        self.extra_carriages = 0  
         self.current_segment_index = 0
         self.direction = 1
         self.passengers = []
-        self.capacity = 6
         self.on_ghost_segment = False
 
         self.current_segment = line.segments[0] if line.segments else None
@@ -153,6 +153,7 @@ class Train:
             self.boarding_index = 0
 
     # === SEGMENT I RUCH PO LINII ===
+
     def get_current_segment(self):
         if 0 <= self.current_segment_index < len(self.line.segments):
             return self.line.segments[self.current_segment_index]
@@ -207,6 +208,10 @@ class Train:
         return b if self.position >= 1.0 else a if self.position <= 0.0 else None
 
     # === PASAŻEROWIE ===
+    def capacity(self):
+        return 6 + self.extra_carriages * 6
+    def add_carriage(self):
+        self.extra_carriages += 1
     def handle_boarding(self):
         station = self.get_station_at_current_position()
         if not station:
@@ -225,14 +230,14 @@ class Train:
         self.boarding_timer += 0.016
         if self.boarding_timer >= 0.2:
             self.boarding_timer = 0
-            if candidates and len(self.passengers) < self.capacity:
+            if candidates and len(self.passengers) < self.capacity():
                 p = candidates.pop(0)
                 self.passengers.append(p)
                 station.passengers.remove(p)
                 self.boarding_index += 1
                 return
 
-        if len(self.passengers) >= self.capacity or not candidates:
+        if len(self.passengers) >= self.capacity() or not candidates:
             self.state = "moving"
             self.boarding_timer = 0.0
             self.boarding_index = 0
@@ -330,6 +335,10 @@ class GameState:
             self.dragged_segment = None  # przechowywany przeciągany segment
             self.dragged_line = None     # linia, której segment przeciągamy
             self.selected_line = None
+            self.available_trains = 2
+            self.available_carriages = 0
+            self.dragging_train_icon = False
+            self.dragging_carriage_icon = False
 
         
     def is_valid_station_position(self, x, y):
@@ -389,9 +398,19 @@ class GameState:
 
     def add_train_to_line(self, color):
         line = self.color_to_line.get(color)
-        if line and not any(t.line == line for t in self.trains):
-            self.trains.append(Train(line))
-            print(f"Dodano pociąg do linii {color}")
+        if line and self.available_trains > 0:
+            # max 4 pociągi na linię
+            trains_on_line = [t for t in self.trains if t.line == line]
+            if len(trains_on_line) < 4:
+                self.trains.append(Train(line))
+                self.available_trains -= 1
+                print(f"Dodano pociąg do linii {color}")
+    def add_carriage_to_train(self, train):
+        if self.available_carriages > 0:
+            train.add_carriage()
+            self.available_carriages -= 1
+            print(f"Dodano wagon do pociągu")
+
 
     def find_clicked_segment(self, pos):
         for line in self.lines:
@@ -452,6 +471,20 @@ class GameState:
             print(f"Wygenerowano nową stację: {shape} ({'góra' if on_top else 'dół'})")
 
     def handle_mouse_down(self, button, pos, camera):
+        # Spójne z draw_resource_info
+        train_rect = pygame.Rect(30, 30, 60, 30)
+        carriage_rect = pygame.Rect(102, 48, 40, 30)
+
+        if train_rect.collidepoint(pos) and self.available_trains > 0:
+            self.dragging_train_icon = True
+            print("🚂 Rozpoczęto przeciąganie lokomotywy")
+            return
+
+        if carriage_rect.collidepoint(pos) and self.available_carriages > 0:
+            self.dragging_carriage_icon = True
+            print("🚋 Rozpoczęto przeciąganie wagonu")
+            return
+
         if button == 1:
             base_x = 20
             base_y = camera.screen_height - 50
@@ -468,7 +501,6 @@ class GameState:
             clicked_station = next((s for s in self.stations if math.hypot(s.x - world_pos[0], s.y - world_pos[1]) <= STATION_RADIUS), None)
 
             if not clicked_station:
-                # Spróbuj znaleźć kliknięty segment — logika przeciągania
                 segment_info = self.find_clicked_segment((pos[0] + camera.x, pos[1] + camera.y))
                 if segment_info:
                     line, a, b = segment_info
@@ -477,7 +509,6 @@ class GameState:
                     self.selected_line = line
                     print(f"Rozpoczęto przeciąganie segmentu między {a.shape} a {b.shape}")
                 return
-
 
             if self.selected_station is None:
                 self.selected_station = clicked_station
@@ -506,8 +537,34 @@ class GameState:
                     self.dragged_segment = (a, b)
                     self.dragged_line = line
     def handle_mouse_up(self, pos, camera):
+        if self.dragging_train_icon:
+            self.dragging_train_icon = False
+            segment_info = self.find_clicked_segment((pos[0] + camera.x, pos[1] + camera.y))
+            if segment_info:
+                line, a, b = segment_info
+                trains_on_line = [t for t in self.trains if t.line == line]
+                if len(trains_on_line) < 4:
+                    self.trains.append(Train(line))
+                    self.available_trains -= 1
+                    print(f"➕ Przeciągnięto pociąg na linię {line.default_color}")
+            return
+
+        if self.dragging_carriage_icon:
+            self.dragging_carriage_icon = False
+            segment_info = self.find_clicked_segment((pos[0] + camera.x, pos[1] + camera.y))
+            if segment_info:
+                line, a, b = segment_info
+                # Znajdź najbliższy pociąg na tej linii
+                for train in self.trains:
+                    if train.line == line:
+                        train.add_carriage()
+                        self.available_carriages -= 1
+                        print(f"➕ Dodano wagon do pociągu na linii {line.default_color}")
+                        break
+            return
+
         if self.selected_line is None:
-            return  # nie rób nic, jeśli nie wybrano linii
+            return
 
         if self.dragged_segment and self.dragged_line:
             a, b = self.dragged_segment
@@ -523,7 +580,6 @@ class GameState:
                 None
             )
 
-            # Awaryjnie dodaj stację, jeśli nic nie znaleziono
             if not dropped_station:
                 self.dragged_segment = None
                 self.dragged_line = None
@@ -540,41 +596,34 @@ class GameState:
                         ] + segments[i+1:]
                         self.dragged_line.segments = new_segments
                         self.dragged_line.update_line_type()
-                        # Zaktualizuj indeksy pociągów, jeśli zmiana dotyczyła wcześniejszego segmentu
                         for train in self.trains:
                             if train.line == self.dragged_line:
-                                # znajdź oryginalny indeks zmodyfikowanego segmentu
                                 try:
                                     original_index = segments.index((a, b, color))
                                 except ValueError:
                                     original_index = segments.index((b, a, color))
 
                                 if train.current_segment_index > original_index:
-                                    train.current_segment_index += 1  # bo jeden segment zastąpiły dwa
+                                    train.current_segment_index += 1
                                     print(f"🔁 Skorygowano indeks pociągu z powodu edycji wcześniejszego segmentu")
 
                                 elif train.current_segment_index == original_index:
-                                    # Segment, po którym jedzie, został rozdzielony
                                     train.on_ghost_segment = True
                                     print(f"👻 Pociąg był na modyfikowanym segmencie — pozostaje na ghost segmencie {a.shape}-{b.shape}")
 
                         print(f"✅ Segment {a.shape}-{b.shape} rozdzielony przez {dropped_station.shape}")
-                        # Aktualizuj segmenty pociągów jeśli któryś jechał po modyfikowanym segmencie
                         for train in self.trains:
                             if train.line == self.dragged_line:
-                                # Jeśli aktualny segment to właśnie rozdzielany
                                 if train.current_segment == (a, b, color) or train.current_segment == (b, a, color):
                                     train.on_ghost_segment = True
                                     print(f"👻 Pociąg wchodzi na ghost segment: {a.shape}-{b.shape}")
-                                    # NIE zmieniamy current_segment ani position!
-
-
                         break
             else:
                 print(f"⚠️ Nie znaleziono nowej stacji do przecięcia segmentu lub wybrano stację {a.shape}/{b.shape}")
 
         self.dragged_segment = None
         self.dragged_line = None
+
 
 
 
@@ -586,6 +635,8 @@ class GameState:
             self.total_days_passed = days_passed_now
             if self.total_days_passed % self.UNLOCK_CYCLE_DAYS == 0:
                 self.unlock_next_line()
+                self.available_trains += 1
+                self.available_carriages += 1
 
         for train in self.trains:
             train.update()
