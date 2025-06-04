@@ -105,7 +105,7 @@ class Train:
         if dist == 0:
             return
 
-        speed = BASE_TRAIN_SPEED / (dist + 1)
+        speed = 1.5 * BASE_TRAIN_SPEED / (dist + 1)
 
         if self.position > 0.8:
             slowdown = (1.0 - self.position) / 0.2
@@ -330,6 +330,7 @@ class GameState:
         self.width = int(width * 1.5)
         self.height = int(height * 1.5)
         self.river_y = self.height // 2
+        self.river_margin = 100
 
         # Stacje
         self.stations = []
@@ -369,6 +370,72 @@ class GameState:
         self.base_spawn_interval = 30000
 
     # === GENEROWANIE STACJI ===
+    def generate_poisson_stations(self, count=3, radius=50, over_river=True):
+        width, height = self.width, self.height
+        river_y = self.river_y
+        margin = self.river_margin
+        center_x = width // 2
+        bias_range = width // 3
+
+        points = []
+        attempts = 0
+        max_attempts = count * 15
+
+        while len(points) < count and attempts < max_attempts:
+            x = random.randint(center_x - bias_range, center_x + bias_range)
+            y = random.randint(50, height - 50)
+
+            if river_y - margin < y < river_y + margin:
+                attempts += 1
+                continue
+
+            if over_river and y > river_y - margin:
+                attempts += 1
+                continue
+            if not over_river and y < river_y + margin:
+                attempts += 1
+                continue
+
+            if any((px - x) ** 2 + (py - y) ** 2 < radius ** 2 for px, py in points):
+                attempts += 1
+                continue
+
+            points.append((x, y))
+            attempts += 1
+
+        return points
+
+    def generate_harmonious_poisson_triangle(self, count=3, radius=50, over_river=True, trials=20):
+        best_score = float("inf")
+        best_points = None
+        min_triangle_height = 20  
+
+        for _ in range(trials):
+            points = self.generate_poisson_stations(count=count, radius=radius, over_river=over_river)
+            if len(points) < 3:
+                continue
+
+            a, b, c = points[:3]
+
+
+            ys = [a[1], b[1], c[1]]
+            height = max(ys) - min(ys)
+            if height < min_triangle_height:
+                continue  
+
+            sides = [
+                math.dist(a, b),
+                math.dist(b, c),
+                math.dist(c, a)
+            ]
+            side_diff = max(sides) - min(sides)
+
+            if side_diff < best_score:
+                best_score = side_diff
+                best_points = [a, b, c]
+
+
+        return best_points
 
     def is_valid_station_position(self, x, y):
         min_dist = 80
@@ -377,19 +444,40 @@ class GameState:
                 return False
         return True
 
-    def generate_station_with_shape(self, shape, on_top):
+    def generate_station_with_shape(self, shape, x=None, y=None):
+        margin = self.river_margin  
+
         for _ in range(100):
-            x = random.randint(self.width // 6, self.width * 5 // 6)
-            y = random.randint(50, self.river_y - 50) if on_top else random.randint(self.river_y + 50, self.height - 50)
+            if x is None or y is None:
+                x = random.randint(60, self.width - 60)
+                y = random.randint(60, self.height - 60)
+
+            if self.river_y - margin < y < self.river_y + margin:
+                continue
+
             if self.is_valid_station_position(x, y):
                 return Station(x, y, shape)
-        return Station(random.randint(100, self.width - 100),
-                       random.randint(100, self.height - 100), shape)
+
+        print("⚠️ Fallback: nie udało się znaleźć dobrego miejsca, umieszczam stację losowo")
+        return Station(random.randint(60, self.width - 60), random.randint(60, self.height - 60), shape)
+
 
     def generate_initial_stations(self):
+        stations = []
+
+        over_river = random.choice([True, False])
+
+        positions = self.generate_harmonious_poisson_triangle()
+
         shapes = ['C', 'T', 'Q']
-        random.shuffle(shapes)
-        return [self.generate_station_with_shape(shape, True) for shape in shapes]
+        random.shuffle(shapes)  
+
+        for (x, y), shape in zip(positions, shapes):
+            stations.append(self.generate_station_with_shape(shape, x=x, y=y))
+
+        return stations
+
+
 
     def add_station(self, shape, on_top):
         station = self.generate_station_with_shape(shape, on_top)
