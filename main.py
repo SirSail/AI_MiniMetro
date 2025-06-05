@@ -33,6 +33,10 @@ while running:
 
         if event.type == pygame.MOUSEBUTTONUP:
             game.handle_mouse_up(event.pos, camera)
+            
+        if event.type == pygame.MOUSEMOTION:
+            game.handle_mouse_motion(event.pos, camera)
+    
 
 
     game.update(dt)

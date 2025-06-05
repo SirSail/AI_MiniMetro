@@ -60,13 +60,20 @@ def draw_hud(screen, game_state):
     hud_rect = pygame.Rect(screen.get_width() - 220, 10, 200, 60)
     pygame.draw.rect(screen, (30, 30, 30), hud_rect, border_radius=8)
     pygame.draw.rect(screen, (200, 200, 200), hud_rect, 2, border_radius=8)
-
+    
     # Tekst dnia i wyniku
     day_label = game_state.get_current_day_label()
     font = pygame.font.SysFont("Arial", 24)
     time_text = font.render(day_label, True, (255, 255, 255))
     score_text = font.render(f"Pasażerowie: {game_state.total_score}", True, (255, 255, 255))
+    base_x, base_y = 20, screen.get_height() - 50
+    size, padding = 30, 10
 
+    for i, color in enumerate(LINE_COLORS):
+        rect = pygame.Rect(base_x + i * (size + padding), base_y, size, size)
+        pygame.draw.rect(screen, color, rect)
+        if game_state.selected_line_color == color:
+            pygame.draw.rect(screen, (0, 0, 0), rect, 3)
 
     screen.blit(time_text, (hud_rect.x + 10, hud_rect.y + 5))
     screen.blit(score_text, (hud_rect.x + 10, hud_rect.y + 30))
@@ -97,7 +104,15 @@ def draw_game(screen, game_state, camera):
             offsets.remove(0)
         for color, offset in zip(colors, offsets):
             draw_offset_line_between_stations(screen, station_a, station_b, camera, color, offset)
-
+    if game_state.hovered_segment:
+        line, a, b = game_state.hovered_segment
+        mx = (a.x + b.x) // 2
+        my = (a.y + b.y) // 2
+        sx, sy = camera.apply((mx, my))
+        pygame.draw.circle(screen, (200, 0, 0), (sx, sy), 10)
+        pygame.draw.line(screen, (255, 255, 255), (sx - 5, sy - 5), (sx + 5, sy + 5), 2)
+        pygame.draw.line(screen, (255, 255, 255), (sx + 5, sy - 5), (sx - 5, sy + 5), 2)
+    
     # Rysuj stacje i resztę tak samo jak wcześniej
     for station in game_state.stations:
         draw_station(screen, station, camera)

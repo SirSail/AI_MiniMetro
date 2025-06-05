@@ -46,8 +46,22 @@ class Line:
         self.segments.append((station_a, station_b, self.default_color))
         self.update_line_type()
         return True
+    def clear_line(self, color):
+        line = self.color_to_line.get(color)
+        if line:
+            line.clear_segments()
+            # Usuwamy też pociągi z tej linii
+            self.trains = [t for t in self.trains if t.line != line]
 
 
+
+    def remove_segment(self, station_a, station_b):
+        self.segments = [
+            seg for seg in self.segments
+            if not ((seg[0] == station_a and seg[1] == station_b) or
+                    (seg[0] == station_b and seg[1] == station_a))
+        ]
+        self.update_line_type()
 
     def get_segments(self):
         return self.segments
@@ -423,15 +437,17 @@ class GameState:
         self.unlocked_colors = LINE_COLORS[:INITIAL_UNLOCKED_LINES]
         self.selected_line_color = None
         self.selected_line = None
+        self.active_line = None  
 
         # Pociągi
         self.trains = []
         self.available_trains = 2
         self.available_carriages = 0
 
-        # Przeciąganie segmentów
+        # Segmenty
         self.dragged_segment = None
         self.dragged_line = None
+        self.hovered_segment = None  
 
         # Interfejs zasobów
         self.dragging_train_icon = False
@@ -575,11 +591,18 @@ class GameState:
     def select_line_color(self, color):
         if self.selected_line_color == color:
             self.selected_line_color = None
-            return False
-        if color not in self.get_available_colors():
+            self.active_line = None
             return False
         self.selected_line_color = color
+        if color in self.color_to_line:
+            self.active_line = self.color_to_line[color]
+        else:
+            new_line = Line(color)
+            self.lines.append(new_line)
+            self.color_to_line[color] = new_line
+            self.active_line = new_line
         return True
+
 
     # === POCIĄGI I WAGONY ===
 
@@ -689,6 +712,10 @@ class GameState:
                 self.available_trains += 1
                 self.available_carriages += 1
 
+        if self.dragged_segment and self.dragged_line and dropped_station is None:
+            # Usuwamy segment całkowicie
+            a, b = self.dragged_segment
+            self.dragged_line.remove_segment(a, b)
 
         for train in self.trains:
             train.update()
@@ -715,6 +742,15 @@ class GameState:
             self.station_spawn_timer = 0
 
         # ===  Interakcja myszy (przeciąganie zasobów i segmentów) === 
+    def handle_mouse_motion(self, pos, camera):
+        world_pos = (pos[0] + camera.x, pos[1] + camera.y)
+        self.hovered_segment = None
+        for line in self.lines:
+            for a, b, _ in line.get_segments():
+                if self.is_near_line_segment(world_pos, a, b, threshold=10):
+                    self.hovered_segment = (line, a, b)
+                    return
+
     def handle_mouse_down(self, button, pos, camera):
         # Recty spójne z UI zasobów
         train_rect = pygame.Rect(30, 30, 60, 30)
@@ -727,6 +763,17 @@ class GameState:
         if carriage_rect.collidepoint(pos) and self.available_carriages > 0:
             self.dragging_carriage_icon = True
             return
+        if button == 1 and self.hovered_segment:
+            line, a, b = self.hovered_segment
+            mx = (a.x + b.x) // 2
+            my = (a.y + b.y) // 2
+            sx, sy = mx - camera.x, my - camera.y
+            if math.hypot(pos[0] - sx, pos[1] - sy) <= 10:
+                line.segments = [s for s in line.segments if not ((s[0] == a and s[1] == b) or (s[0] == b and s[1] == a))]
+                line.update_line_type()
+                self.trains = [t for t in self.trains if t.line != line or t.get_current_segment() in line.segments]
+                self.hovered_segment = None
+                return
 
         if button == 1:
             # Panel wyboru koloru linii (u dołu ekranu)
@@ -748,17 +795,22 @@ class GameState:
             if clicked_station:
                 if self.selected_station is None:
                     self.selected_station = clicked_station
+                    # Jeśli brak aktywnej linii, sprawdź, czy kliknięta stacja należy do jakiejś
+                    if self.active_line is None:
+                        for line in self.lines:
+                            if any(clicked_station in seg[:2] for seg in line.get_segments()):
+                                self.active_line = line
+                                self.selected_line_color = line.default_color
+                                print("🔁 Automatycznie aktywowano linię:", line.default_color)
+                                break
                 else:
-                    if self.selected_line_color:
-                        line = self.color_to_line.get(self.selected_line_color)
-                        if line is None:
-                            line = Line(self.selected_line_color)
-                            self.lines.append(line)
-                            self.color_to_line[self.selected_line_color] = line
-
+                    if self.active_line:
                         if clicked_station != self.selected_station:
-                            added = line.add_segment(self.selected_station, clicked_station)
+                            added = self.active_line.add_segment(self.selected_station, clicked_station)
+                            if added:
+                                print("➕ Dodano segment do linii", self.active_line.default_color)
                     self.selected_station = None
+
             else:
                 segment_info = self.find_clicked_segment(world_pos)
                 if segment_info:
