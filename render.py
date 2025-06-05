@@ -339,27 +339,61 @@ def draw_station(screen, station, camera):
         'C': (200, 0, 0),
         'T': (0, 200, 0),
         'Q': (0, 0, 200),
+        'D': (255, 215, 0),
+        'S': (255, 255, 0),
+        'H': (0, 255, 255),
+        'X': (255, 100, 100),  
     }
+
 
     color = SHAPES_COLORS.get(station.shape, (100, 100, 100))
     x, y = camera.apply((station.x, station.y))
 
     # Draw base station shape
+# Draw base station shape with black outline
     if station.shape == 'C':
         pygame.draw.circle(screen, color, (x, y), 20)
+        pygame.draw.circle(screen, (0, 0, 0), (x, y), 20, 2)
     elif station.shape == 'T':
-        points = [
-            (x, y - 20),
-            (x - 20, y + 20),
-            (x + 20, y + 20),
-        ]
+        points = [(x, y - 20), (x - 20, y + 20), (x + 20, y + 20)]
         pygame.draw.polygon(screen, color, points)
+        pygame.draw.polygon(screen, (0, 0, 0), points, 2)
     elif station.shape == 'Q':
-        pygame.draw.rect(screen, color, pygame.Rect(x - 20, y - 20, 40, 40))
+        rect = pygame.Rect(x - 20, y - 20, 40, 40)
+        pygame.draw.rect(screen, color, rect)
+        pygame.draw.rect(screen, (0, 0, 0), rect, 2)
     elif station.shape == 'D':
-        pygame.draw.polygon(screen, (255, 215, 0), [
-            (x, y - 20), (x + 15, y), (x, y + 20), (x - 15, y)
-        ])
+        points = [(x, y - 20), (x + 15, y), (x, y + 20), (x - 15, y)]
+        pygame.draw.polygon(screen, color, points)
+        pygame.draw.polygon(screen, (0, 0, 0), points, 2)
+    elif station.shape == 'S':
+        points = []
+        for i in range(10):
+            angle = i * math.pi / 5
+            radius = 20 if i % 2 == 0 else 8
+            px = x + math.cos(angle) * radius
+            py = y + math.sin(angle) * radius
+            points.append((px, py))
+        pygame.draw.polygon(screen, color, points)
+        pygame.draw.polygon(screen, (0, 0, 0), points, 2)
+    elif station.shape == 'H':
+        points = []
+        for i in range(6):
+            angle = math.pi / 3 * i
+            px = x + math.cos(angle) * 20
+            py = y + math.sin(angle) * 20
+            points.append((px, py))
+        pygame.draw.polygon(screen, color, points)
+        pygame.draw.polygon(screen, (0, 0, 0), points, 2)
+    elif station.shape == 'X':
+        vbar = pygame.Rect(x - 6, y - 20, 12, 40)
+        hbar = pygame.Rect(x - 20, y - 6, 40, 12)
+        pygame.draw.rect(screen, color, vbar)
+        pygame.draw.rect(screen, color, hbar)
+        pygame.draw.rect(screen, (0, 0, 0), vbar, 2)
+        pygame.draw.rect(screen, (0, 0, 0), hbar, 2)
+
+
 
     # Draw individual passengers
     max_dots = 8
