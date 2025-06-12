@@ -1,8 +1,16 @@
 import pygame
-from core import LINE_COLORS
-from core import STATION_RADIUS
 import math
 from collections import defaultdict
+from game.game_state import GameState
+
+
+from models.station import Station
+from models.line import Line
+from models.train import Train
+from models.passenger import Passenger
+from game.game_state import LINE_COLORS, STATION_RADIUS, TRAIN_ICON_SIZE, TRAIN_ICON_PADDING
+
+
 TRAIN_ICON_SIZE = 30
 TRAIN_ICON_PADDING = 10
 class Camera:
@@ -85,7 +93,6 @@ def draw_game(screen, game_state, camera):
 
     # Utwórz słownik: klucz to tuple (station_a, station_b) (w uporządkowanej kolejności), wartość to lista kolorów linii na tym segmencie
     segment_map = defaultdict(list)
-
     for line in game_state.lines:
         for (station_a, station_b, _) in line.segments:
             if not (hasattr(station_a, 'x') and hasattr(station_b, 'x')):
@@ -130,18 +137,15 @@ def draw_game(screen, game_state, camera):
 
 # Rysuj pociągi + duchowe segmenty
     for train in game_state.trains:
-        if train.on_ghost_segment and train.current_segment:
-            a, b, color = train.current_segment
+        if train.on_ghost_segment and train.ghost_segment:
+            a, b, color = train.ghost_segment
             base_color = color if isinstance(color, tuple) else (200, 200, 200)
-            
-            # rozjaśnij kolor
             brightened = tuple(min(255, c + 80) for c in base_color)
-            
             draw_offset_line_between_stations(screen, a, b, camera, brightened, offset=0)
 
-            
 
         draw_train(screen, train, camera)
+
 
 
     # Rysuj pasek wyboru koloru
@@ -448,4 +452,3 @@ def draw_station(screen, station, camera):
 
     if getattr(station, 'is_overloaded', False):
         pygame.draw.circle(screen, (255, 0, 0), (x, y), 28, 5)
-

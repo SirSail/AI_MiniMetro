@@ -1,6 +1,7 @@
 import pygame
-from core import GameState
+from game.game_state import GameState
 from render import draw_game, draw_hud, Camera
+
 
 
 pygame.init()
